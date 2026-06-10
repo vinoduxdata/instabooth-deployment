@@ -80,6 +80,94 @@ Manage events and templates in the admin UI at `/admin/event` and `/admin/event-
 
 Open the UI at http://localhost:8000 (default).
 
+Demo mode (virtual camera, no DSLR):
+
+```bash
+~/instabooth/instabooth-deployment/start-booth.sh --mode=demo
+```
+
+Production mode is the default when `--mode` is omitted.
+
+## Guest Wi-Fi hotspot (offline share)
+
+`start-booth.sh` starts a **NetworkManager** Wi-Fi hotspot on Ubuntu before the booth app runs (demo and prod). Guests scan the auto-generated Wi-Fi join QR in the **Share** overlay, then scan the photo download QR — no internet required.
+
+### Prerequisites
+
+- Ubuntu (or Debian) with **NetworkManager** and `nmcli`
+- A Wi-Fi adapter that supports access-point mode
+- The booth machine cannot use venue Wi-Fi and host a hotspot at the same time on one radio
+
+Install if needed:
+
+```bash
+sudo apt install network-manager
+```
+
+### Configuration
+
+Hotspot settings live in booth-global config:
+
+- `instabooth-admin/booth.demo.json` → `hotspot` (demo)
+- `instabooth-admin/booth.prod.json` → `hotspot` (prod)
+
+```json
+"hotspot": {
+  "enabled": true,
+  "ssid": "InstaBooth",
+  "password": "change-me-8chars",
+  "interface": ""
+}
+```
+
+Override with environment variables (take precedence over JSON):
+
+| Variable | Purpose |
+|----------|---------|
+| `INSTABOOTH_HOTSPOT_SSID` | Guest network name |
+| `INSTABOOTH_HOTSPOT_PASSWORD` | WPA password (min 8 chars) |
+| `INSTABOOTH_HOTSPOT_IFACE` | Wi-Fi interface (empty = auto) |
+| `INSTABOOTH_HOTSPOT_ENABLED` | `0` / `false` to skip hotspot |
+
+On start, the launcher writes `userdata/event-inputs/wifi-qr-code/auto-wifi-qr.png` in the active event data folder. Offline share uses this QR only (uploaded decorative Wi-Fi images are ignored).
+
+### Permissions (passwordless hotspot)
+
+`nmcli device wifi hotspot` usually requires root. `start-booth.sh` calls `setup-hotspot.sh` via `sudo`. For a kiosk user without a password prompt, add a polkit rule (adjust user name):
+
+```text
+/etc/polkit-1/rules.d/50-instabooth-hotspot.rules
+```
+
+```javascript
+polkit.addRule(function(action, subject) {
+  if (action.id.indexOf("org.freedesktop.NetworkManager.") == 0 &&
+      subject.user == "vinod") {
+    return polkit.Result.YES;
+  }
+});
+```
+
+Or allow the booth user to run the deployment scripts via `/etc/sudoers.d/instabooth`.
+
+### Stop hotspot
+
+When `start-booth.sh` exits (Ctrl+C), it runs `stop-hotspot.sh` automatically. To stop manually:
+
+```bash
+sudo ~/instabooth/instabooth-deployment/stop-hotspot.sh
+```
+
+### Test offline share
+
+1. Start the booth: `~/instabooth/instabooth-deployment/start-booth.sh`
+2. Confirm hotspot: `nmcli connection show --active` (look for `instabooth-hotspot`)
+3. Take a photo and open **Share** on the post-capture screen
+4. On a phone (mobile data off), scan the **Join booth Wi-Fi** QR, then the **Download photo** QR
+5. The download URL uses the hotspot IP (e.g. `http://10.42.0.1:8000/api/share/offline/...`)
+
+If hotspot setup fails, the booth still starts; only the Wi-Fi QR will be missing until networking is fixed.
+
 ## Update workflows
 
 ### Frontend only
