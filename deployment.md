@@ -1,6 +1,6 @@
 # Instabooth deployment
 
-Booth runtime lives in **instabooth-data** (working directory). Application code is in **instabooth-server** and **instabooth-frontend**.
+Booth runtime data lives in **instabooth-data** (per event). Event templates and the event registry live in **instabooth-admin** (git-synced). Application code is in **instabooth-server** and **instabooth-frontend**.
 
 ## Repositories
 
@@ -8,8 +8,9 @@ Booth runtime lives in **instabooth-data** (working directory). Application code
 |------|------|
 | [instabooth-server](https://github.com/vinoduxdata/instabooth-server) | Python backend (`photobooth` CLI) |
 | [instabooth-frontend](https://github.com/vinoduxdata/instabooth-frontend) | Vue/Quasar UI (build copied into server) |
-| [instabooth-data](https://github.com/vinoduxdata/instabooth-data) | Runtime data: `config/config.json`, media, DB, logs |
-| instabooth-deployment | This guide |
+| [instabooth-admin](https://github.com/vinoduxdata/instabooth-admin) | Git-synced templates, event registry, booth-global config |
+| [instabooth-data](https://github.com/vinoduxdata/instabooth-data) | Runtime data for the default/active event (not git-synced per new event) |
+| instabooth-deployment | This guide and `start-booth.sh` |
 
 ## Prerequisites
 
@@ -27,6 +28,7 @@ cd ~/instabooth
 git clone https://github.com/vinoduxdata/instabooth-server.git
 git clone https://github.com/vinoduxdata/instabooth-frontend.git
 git clone https://github.com/vinoduxdata/instabooth-data.git
+git clone https://github.com/vinoduxdata/instabooth-admin.git
 ```
 
 ### Frontend
@@ -56,17 +58,25 @@ python -m pip install -e .
 python -m pip install pydot
 ```
 
-`instabooth-data` should already contain `config/config.json`. On first start the app creates any missing runtime folders (`database/`, `media/`, `cache/`, `log/`, etc.) and links demo assets under `userdata/demoassets/`.
+Each event folder under `instabooth-data/events/` contains `config/config.json`. On first start the app creates any missing runtime folders (`database/`, `media/`, `cache/`, `log/`, etc.) and links demo assets under `userdata/demoassets/`.
 
 ## Run the booth
 
-Always start from **instabooth-data** (current working directory = data root):
+Recommended: use the launcher (reads `instabooth-admin/active-event.json`):
 
 ```bash
-cd ~/instabooth/instabooth-data
-source ../instabooth-server/myenv/bin/activate
-photobooth
+chmod +x ~/instabooth/instabooth-deployment/start-booth.sh
+~/instabooth/instabooth-deployment/start-booth.sh
 ```
+
+Or manually with explicit paths:
+
+```bash
+source ~/instabooth/instabooth-server/myenv/bin/activate
+photobooth --admin-dir ~/instabooth/instabooth-admin --data-dir ~/instabooth/instabooth-data
+```
+
+Manage events and templates in the admin UI at `/admin/event` and `/admin/event-template`. Activating an event updates `active-event.json` and restarts the booth into that event's data folder.
 
 Open the UI at http://localhost:8000 (default).
 
@@ -97,7 +107,7 @@ photobooth
 
 ### Config only
 
-Edit `~/instabooth/instabooth-data/config/config.json`, or pull from **instabooth-data**:
+Edit the active event's `config/config.json` (for example `~/instabooth/instabooth-data/events/default/config/config.json`), or pull from **instabooth-data**:
 
 ```bash
 cd ~/instabooth/instabooth-data
@@ -112,18 +122,55 @@ Saves from the admin UI write backups next to the config file, e.g. `config/conf
 
 ```
 instabooth-data/
-├── config/
-│   └── config.json          # required; tracked in git
-├── cache/                   # created on first run if missing
-├── database/
-├── log/
-├── media/
-│   ├── camera_original/
-│   ├── unprocessed_original/
-│   └── processed_full/
-├── recycle/
-├── tmp/
-└── userdata/                # demoassets/ symlinked on first run
+└── events/
+    ├── default/                 # default event
+    │   ├── config/config.json
+    │   ├── cache/
+    │   ├── database/
+    │   ├── log/
+    │   ├── media/
+    │   ├── recycle/
+    │   ├── tmp/
+    │   └── userdata/            # demoassets/ symlinked on first run
+    └── {event-id}/              # events created from templates
 ```
 
 Do not commit `userdata/demoassets/` as a normal directory; the server expects to create a symlink there.
+
+## Multi-event layout
+
+```
+instabooth-admin/                 # git-synced
+├── booth.json                    # booth-global: cameras, GPIO, admin password
+├── events.json                   # event registry
+├── active-event.json             # pointer to active event data folder
+└── templates/{template-id}/      # reusable templates (config + userdata)
+
+instabooth-data/
+└── events/{event-id}/            # all event runtime data lives here
+```
+
+New events created in the admin UI are stored under `instabooth-data/events/` and are **not** git-synced.
+
+## Migration from single-event setup
+
+If you already have a working `instabooth-data` folder but no `instabooth-admin` registry yet:
+
+```bash
+python3 ~/instabooth/instabooth-server/scripts/migrate_to_multievent.py --root ~/instabooth
+```
+
+This creates `instabooth-admin` with a default template, moves legacy runtime folders into `instabooth-data/events/default/`, and registers that folder as the `default` active event.
+
+The older standalone **instabooth-config** backup repo is superseded by **instabooth-admin** for booth-global settings and templates.
+
+## Admin pages
+
+| URL | Purpose |
+|-----|---------|
+| `/admin/event` | Create and manage events |
+| `/admin/event-template` | Create and manage templates |
+| `/admin/event/:id/config` | Edit a draft or inactive event config |
+| `/admin/event-template/:id/config` | Edit template config |
+| `/admin/event/:id/files` | Manage event assets |
+| `/admin/event-template/:id/files` | Manage template assets |
